@@ -72,3 +72,6 @@ Thumbs.db
 
 # Antigravity & AI Agent scratchpad
 .gemini/
+
+# Standalone repositories
+research-notebooks/

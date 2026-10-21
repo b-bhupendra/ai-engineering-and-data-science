@@ -20,5 +20,9 @@ ai-engineering-and-data-science/
 - **Data Engineering & Ops:** Git, DVC, Docker, MLflow
 - **Environments:** Jupyter Lab / Notebooks, VS Code
 
+## 🔗 Related Repositories & Modules
+
+- **[b-bhupendra/research-notebooks](https://github.com/b-bhupendra/research-notebooks)**: Zero-rate-limit CDN retrieval architecture, single-request manifest pattern, technical posts, and exploratory notebooks.
+
 ---
 *Created for tracking course progress, implementations, and AI engineering milestones.*
