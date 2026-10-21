@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-project_cli.py - Unified Course Project Scaffolder & Blog Publisher
+project_cli.py - Course Project Scaffolder & Research Hub Publisher
 -------------------------------------------------------------------
-A zero-dependency CLI tool to:
-1. Scaffold course projects with:
-   - architecture_and_notes/
-   - README.md (rich metadata: where taught, instructor, syllabus, objectives)
-   - tinker/ (notebooks & exploratory experiments)
-   - blog/ (technical post draft & visual assets)
-   - deployable/ (standalone Git-initialized microservice / repo)
-2. Sync & reflect project blogs directly into `research-notebooks/` bundles,
+A clean, zero-dependency CLI tool to:
+1. Scaffold course/tutorial projects under `courses/<slug>/` with:
+   - architecture_and_notes/ (system blueprints & notes)
+   - README.md (curriculum metadata: where taught, instructor, syllabus, objectives)
+   - tinker/ (clean empty directory for scratchpads, notebooks, exploratory scripts)
+   - blog/ (technical article draft & assets)
+   - deployable/ (clean empty directory for production/deployment code)
+2. Reflect & publish project blogs into `research-notebooks/` bundles,
    auto-updating the Single-Request Manifest (`manifest.json`) and triggering CDN cache purges.
 """
 
@@ -35,42 +35,11 @@ COURSES_DIR = ROOT_DIR / "courses"
 RESEARCH_DIR = ROOT_DIR / "research-notebooks"
 MANIFEST_FILE = RESEARCH_DIR / "manifest.json"
 
-NOTEBOOK_TEMPLATE = {
-    "cells": [
-        {
-            "cell_type": "markdown",
-            "metadata": {},
-            "source": [
-                "# Exploratory Data Analysis & Prototyping\n",
-                "\n",
-                "This notebook is designated for exploratory analysis, experimentation, and feature prototyping."
-            ]
-        },
-        {
-            "cell_type": "code",
-            "execution_count": None,
-            "metadata": {},
-            "outputs": [],
-            "source": [
-                "import numpy as np\n",
-                "import pandas as pd\n",
-                "\n",
-                "print('Environment initialized successfully.')"
-            ]
-        }
-    ],
-    "metadata": {
-        "language_info": {"name": "python", "version": "3.11"}
-    },
-    "nbformat": 4,
-    "nbformat_minor": 5
-}
-
 
 def slugify(text: str) -> str:
     """Converts a title or name into a clean kebab-case slug."""
     text = text.lower().strip()
-    for char in [" ", "_", "/", "\\", ":", ";", ".", ","]:
+    for char in [" ", "_", "/", "\\", ":", ";", ".", ",", "(", ")", "[", "]", "{", "}"]:
         text = text.replace(char, "-")
     while "--" in text:
         text = text.replace("--", "-")
@@ -89,43 +58,56 @@ def prompt_input(prompt: str, default: str = "") -> str:
                 return raw
 
 
+def resolve_project_dir(name_or_course: str, subproject: str = None) -> Path:
+    """Resolves project path, handling both flat courses/<name>/ and nested courses/<course>/<project>/."""
+    slug_1 = slugify(name_or_course)
+    if subproject and slugify(subproject) != slug_1:
+        slug_2 = slugify(subproject)
+        return COURSES_DIR / slug_1 / slug_2
+    return COURSES_DIR / slug_1
+
+
 def cmd_new(args):
-    """Scaffolds a new course project."""
+    """Scaffolds a new course project without double-nesting and leaves folders clean."""
     print("=" * 60)
     print("🚀 Scaffolding New Course Project")
     print("=" * 60)
 
-    course_name = args.course or prompt_input("Course ID / Folder name (e.g. deeplearning-ai-mlops)")
-    project_name = args.project or prompt_input("Project Name (e.g. model-monitoring-service)")
-    platform = args.platform or prompt_input("Platform / Institution (e.g. Coursera, DeepLearning.AI, Stanford)", "Self-Directed")
+    raw_name = args.name or args.course or prompt_input("Course / Project Name (e.g. eda-in-hospitality-domain)")
+    raw_sub = args.project
+
+    # Avoid duplicate naming if course and project are identical
+    if raw_sub and slugify(raw_sub) == slugify(raw_name):
+        raw_sub = None
+
+    platform = args.platform or prompt_input("Platform / Institution (e.g. Codebasics, Coursera, YouTube)", "Self-Directed")
     instructor = args.instructor or prompt_input("Instructor Name(s)", "Self-Taught")
     course_url = args.url or prompt_input("Course / Syllabus URL", "N/A")
-    objective = args.objective or prompt_input("Project Objective", "Build, evaluate, and deploy a production-grade AI solution.")
-    tech_stack = args.tech_stack or prompt_input("Primary Tech Stack (comma-separated)", "Python, PyTorch, Docker")
+    objective = args.objective or prompt_input("Project Objective", "Hands-on implementation and domain analysis.")
+    tech_stack = args.tech_stack or prompt_input("Primary Tech Stack / Tools (e.g. Python, SQL, PowerBI, Excel)", "General")
 
-    course_slug = slugify(course_name)
-    project_slug = slugify(project_name)
-
-    project_dir = COURSES_DIR / course_slug / project_slug
+    project_dir = resolve_project_dir(raw_name, raw_sub)
     if project_dir.exists():
         print(f"❌ Error: Project directory already exists at: {project_dir}")
         sys.exit(1)
 
-    print(f"\n📂 Creating directory tree at: {project_dir}")
+    project_slug = project_dir.name
+    display_title = project_slug.replace("-", " ").title()
+
+    print(f"\n📂 Creating clean project structure at: {project_dir}")
     arch_dir = project_dir / "architecture_and_notes"
     tinker_dir = project_dir / "tinker"
     blog_dir = project_dir / "blog"
     blog_assets_dir = blog_dir / "assets"
     deploy_dir = project_dir / "deployable"
-    deploy_src_dir = deploy_dir / "src"
 
-    for d in [arch_dir, tinker_dir, blog_assets_dir, deploy_src_dir]:
+    for d in [arch_dir, tinker_dir, blog_assets_dir, deploy_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # 1. README.md
-    readme_content = f"""# {project_name.replace('-', ' ').title()}
+    # 1. README.md (acts as unified metadata index & filter for this course project)
+    readme_content = f"""# {display_title}
 
 > **{objective}**
 
@@ -135,92 +117,83 @@ def cmd_new(args):
 
 | Field | Details |
 | :--- | :--- |
-| **Course Title** | `{course_name}` |
+| **Course / Project** | `{project_slug}` |
 | **Platform / Institution** | {platform} |
 | **Instructor(s)** | {instructor} |
 | **Course / Syllabus URL** | [{course_url}]({course_url}) |
 | **Start Date** | {today} |
 | **Status** | 🚧 In Progress |
-| **Tech Stack** | `{tech_stack}` |
+| **Tech Stack / Tools** | `{tech_stack}` |
 
 ---
 
-## 📂 Project Architecture
+## 📂 Project Organization
 
 ```text
 {project_slug}/
-├── architecture_and_notes/    # System design diagrams, ADRs, study notes
+├── architecture_and_notes/    # System blueprints, flowcharts, and study notes
 │   └── architecture.md
-├── tinker/                    # Exploratory prototyping & EDA notebooks
-│   └── exploration.ipynb
-├── blog/                      # Technical article & visual assets for research-notebooks
+├── tinker/                    # Scratchpads, exploratory notebooks, raw scripts (clean)
+├── blog/                      # Technical article & visual assets for research hub
 │   ├── article.md
 │   └── assets/
-└── deployable/                # Standalone Git-initialized microservice / package
-    ├── src/
-    ├── requirements.txt
-    └── main.py
+└── deployable/                # Production-ready code, models, or deliverables (clean)
 ```
 
 ---
 
 ## 🎯 Objectives & Milestones
 
-- [ ] Complete exploratory analysis and initial model prototyping in `tinker/`.
-- [ ] Define system architecture and technical design specifications in `architecture_and_notes/`.
-- [ ] Implement production service with tests and containerization in `deployable/`.
-- [ ] Draft technical article in `blog/article.md` and publish to `research-notebooks` via `python project_cli.py sync`.
-
----
-
-## 🚀 Running the Deployable Service
-
-```bash
-cd deployable
-pip install -r requirements.txt
-python main.py
-```
+- [ ] Complete exploratory analysis and initial experiments in `tinker/`.
+- [ ] Document architecture, methodology, and design choices in `architecture_and_notes/`.
+- [ ] Package final deliverable/application in `deployable/`.
+- [ ] Write technical summary in `blog/article.md` and publish via `python project_cli.py sync --name {project_slug}`.
 """
     (project_dir / "README.md").write_text(readme_content, encoding="utf-8")
 
     # 2. architecture_and_notes/architecture.md
-    arch_content = f"""# System Architecture & Technical Specifications
+    arch_content = f"""# Architecture & Technical Notes: {display_title}
 
-**Project:** {project_name}  
-**Course:** {course_name}  
+**Course / Project:** {project_slug}  
+**Platform:** {platform}  
+**Instructor:** {instructor}  
 **Date:** {today}
 
 ---
 
-## 1. High-Level Flowchart
+## 1. System & Domain Flow
 
 ```mermaid
 graph TD
-    Client([Client / API Consumer]) --> Gateway[API Gateway / Service]
-    Gateway --> Preprocessor[Data Preprocessing Pipeline]
-    Preprocessor --> Inference[Model Inference Engine]
-    Inference --> Storage[(Database / Feature Store)]
+    Data[Raw Data / Ingestion] --> Processing[Cleaning &amp; Transformation]
+    Processing --> Analysis[Analysis &amp; Modeling]
+    Analysis --> Insights[Insights &amp; Deliverables]
 ```
 
 ---
 
-## 2. Technical Decisions & ADR Notes
+## 2. Methodology & Key Decisions
 
-- **Language / Framework:** {tech_stack}
-- **Data Ingestion Strategy:**
-- **Inference Strategy:**
-- **Observability & Logging:**
+- **Domain Context:**
+- **Data Sources:**
+- **Key Metrics / KPIs:**
+- **Assumptions & Constraints:**
 """
     (arch_dir / "architecture.md").write_text(arch_content, encoding="utf-8")
 
-    # 3. tinker/exploration.ipynb
-    (tinker_dir / "exploration.ipynb").write_text(json.dumps(NOTEBOOK_TEMPLATE, indent=1), encoding="utf-8")
+    # 3. tinker/ (leave completely clean with only .gitkeep)
+    (tinker_dir / ".gitkeep").write_text("", encoding="utf-8")
 
-    # 4. blog/article.md
+    # 4. deployable/ (leave completely clean with only .gitkeep)
+    (deploy_dir / ".gitkeep").write_text("", encoding="utf-8")
+
+    # 5. blog/assets/ (clean with .gitkeep)
+    (blog_assets_dir / ".gitkeep").write_text("", encoding="utf-8")
+
+    # 6. blog/article.md
     blog_content = f"""---
-title: "{project_name.replace('-', ' ').title()}"
+title: "{display_title}"
 slug: "{project_slug}"
-course: "{course_slug}"
 platform: "{platform}"
 instructor: "{instructor}"
 date: "{today}"
@@ -228,61 +201,64 @@ tags: [{', '.join(f'"{t.strip()}"' for t in tech_stack.split(','))}]
 excerpt: "{objective}"
 ---
 
-# {project_name.replace('-', ' ').title()}
+# {display_title}
 
 > {objective}
 
 ---
 
-## 1. Introduction & Problem Statement
+## 1. Overview & Business Context
 
-Describe the core problem, context from **{course_name}**, and what this implementation accomplishes.
-
----
-
-## 2. Architectural Blueprint & Design Choices
-
-Explain key architectural patterns and reference diagrams placed in `assets/`.
+Introduce the domain problem, objectives, and real-world implications explored in this project.
 
 ---
 
-## 3. Implementation Highlights
+## 2. Methodology & Exploration
 
-Walk through key code blocks, optimizations, and benchmarks.
+Detail the techniques, tools, data hygiene practices, and exploration findings.
 
 ---
 
-## 4. Key Takeaways & Future Directions
+## 3. Key Findings & Insights
 
-Summarize learnings, failure modes encountered, and potential enhancements.
+Highlight major takeaways, visualizations (place images in `assets/`), and actionable metrics.
+
+---
+
+## 4. Conclusion & Next Steps
+
+Summarize the outcomes and future scope.
 """
     (blog_dir / "article.md").write_text(blog_content, encoding="utf-8")
 
-    # 5. deployable/ starter files
-    (deploy_src_dir / "__init__.py").write_text("", encoding="utf-8")
-    deploy_main = f"""\"\"\"
-Main entry point for {project_name}.
-\"\"\"
-
-def main():
-    print("🚀 Initializing {project_name} service...")
-    print("Loaded configuration successfully.")
-
-if __name__ == "__main__":
-    main()
-"""
-    (deploy_dir / "main.py").write_text(deploy_main, encoding="utf-8")
-    (deploy_dir / "requirements.txt").write_text("# Production dependencies\n", encoding="utf-8")
-    print("✓ Scaffolding `deployable/` service skeleton (tracked by root repository).")
-
     print("\n" + "=" * 60)
-    print(f"✨ Project successfully created at: courses/{course_slug}/{project_slug}")
+    print(f"✨ Project successfully created at: {project_dir.relative_to(ROOT_DIR)}")
     print("=" * 60)
-    print("Next steps:")
-    print(f"  1. Explore notebooks:   courses/{course_slug}/{project_slug}/tinker/")
-    print(f"  2. Design architecture: courses/{course_slug}/{project_slug}/architecture_and_notes/")
-    print(f"  3. Write blog draft:    courses/{course_slug}/{project_slug}/blog/article.md")
-    print(f"  4. Publish to blog:     python project_cli.py sync --course {course_slug} --project {project_slug}")
+    print("Clean directories ready for your work:")
+    print(f"  • tinker/:       Place scratchpads, notebooks, scripts, or queries here (no forced boilerplate).")
+    print(f"  • deployable/:   Place your deliverable/production code here.")
+    print(f"  • blog/:         Draft your article in `blog/article.md`.")
+    print(f"  • Publish command: python project_cli.py sync --name {project_slug}")
+
+
+def find_project_directory(identifier: str) -> Path:
+    """Finds project by slug in courses/ (either flat courses/<slug> or nested courses/<course>/<slug>)."""
+    target_slug = slugify(identifier)
+
+    # 1. Direct match: courses/<slug>
+    direct = COURSES_DIR / target_slug
+    if direct.exists() and direct.is_dir():
+        return direct
+
+    # 2. Search subdirectories: courses/*/<slug>
+    if COURSES_DIR.exists():
+        for course_folder in COURSES_DIR.iterdir():
+            if course_folder.is_dir():
+                sub = course_folder / target_slug
+                if sub.exists() and sub.is_dir():
+                    return sub
+
+    return None
 
 
 def cmd_sync(args):
@@ -291,24 +267,22 @@ def cmd_sync(args):
     print("🔄 Reflecting Course Project into `research-notebooks`")
     print("=" * 60)
 
-    course_name = args.course or prompt_input("Course Name / Folder")
-    project_name = args.project or prompt_input("Project Name / Folder")
+    identifier = args.name or args.project or args.course or prompt_input("Project / Course Name")
+    project_dir = find_project_directory(identifier)
 
-    course_slug = slugify(course_name)
-    project_slug = slugify(project_name)
-
-    project_dir = COURSES_DIR / course_slug / project_slug
-    if not project_dir.exists():
-        print(f"❌ Error: Project not found at: {project_dir}")
+    if not project_dir or not project_dir.exists():
+        print(f"❌ Error: Could not locate project directory for '{identifier}' under `courses/`")
         sys.exit(1)
 
+    project_slug = project_dir.name
     target_bundle = RESEARCH_DIR / project_slug
     target_bundle_assets = target_bundle / "assets"
     target_bundle_assets.mkdir(parents=True, exist_ok=True)
 
-    print(f"Target research bundle: {target_bundle}")
+    print(f"Found course project: {project_dir.relative_to(ROOT_DIR)}")
+    print(f"Target research bundle: {target_bundle.relative_to(ROOT_DIR)}")
 
-    # Copy blog article
+    # 1. Copy blog article
     src_article = project_dir / "blog" / "article.md"
     dst_article = target_bundle / "article.md"
     if src_article.exists():
@@ -317,38 +291,42 @@ def cmd_sync(args):
     else:
         print(f"⚠️ Warning: No blog article found at {src_article}")
 
-    # Copy architecture notes
+    # 2. Copy architecture notes
     src_arch = project_dir / "architecture_and_notes" / "architecture.md"
     dst_arch = target_bundle / "architecture.md"
     if src_arch.exists():
         dst_arch.write_text(src_arch.read_text(encoding="utf-8"), encoding="utf-8")
         print(f"✓ Synced architecture: {dst_arch.name}")
 
-    # Copy exploration notebook
-    src_nb = project_dir / "tinker" / "exploration.ipynb"
+    # 3. Copy notebook or analysis files from tinker/ if present
+    src_tinker = project_dir / "tinker"
     dst_nb = target_bundle / "notebook.ipynb"
-    if src_nb.exists():
-        dst_nb.write_text(src_nb.read_text(encoding="utf-8"), encoding="utf-8")
-        print(f"✓ Synced notebook: {dst_nb.name}")
+    if src_tinker.exists():
+        notebooks = list(src_tinker.glob("*.ipynb"))
+        if notebooks:
+            dst_nb.write_text(notebooks[0].read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"✓ Synced primary notebook: {notebooks[0].name} -> notebook.ipynb")
+        elif dst_nb.exists():
+            # If no notebook in tinker, ensure no obsolete notebook remains
+            pass
 
-    # Copy blog assets
+    # 4. Copy blog assets
     src_assets = project_dir / "blog" / "assets"
     if src_assets.exists():
         for asset in src_assets.glob("*"):
-            if asset.is_file():
+            if asset.is_file() and asset.name != ".gitkeep":
                 (target_bundle_assets / asset.name).write_bytes(asset.read_bytes())
                 print(f"✓ Synced asset: {asset.name}")
 
-    # Parse metadata to update manifest.json
+    # 5. Parse metadata to update manifest.json
     article_text = dst_article.read_text(encoding="utf-8") if dst_article.exists() else ""
-    title = project_name.replace("-", " ").title()
-    excerpt = "Comprehensive technical implementation and evaluation."
-    tags = ["AI Engineering", "Data Science"]
+    title = project_slug.replace("-", " ").title()
+    excerpt = "Comprehensive technical implementation and domain analysis."
+    tags = ["Data Science", "Analysis"]
     platform = "Self-Directed"
     instructor = "Self-Taught"
     date_str = datetime.now().strftime("%Y-%m-%d")
 
-    # Simple frontmatter parser
     if article_text.startswith("---"):
         parts = article_text.split("---", 2)
         if len(parts) >= 3:
@@ -372,7 +350,6 @@ def cmd_sync(args):
                         val = val.strip("[]")
                         tags = [t.strip().strip('"').strip("'") for t in val.split(",") if t.strip()]
 
-    # Estimate reading time (approx 200 words per minute)
     word_count = len(article_text.split())
     reading_time = max(1, round(word_count / 200))
 
@@ -395,7 +372,7 @@ def cmd_sync(args):
     entry = {
         "slug": project_slug,
         "title": title,
-        "course": course_slug,
+        "course": project_dir.parent.name if project_dir.parent != COURSES_DIR else project_slug,
         "platform": platform,
         "instructor": instructor,
         "excerpt": excerpt,
@@ -404,13 +381,12 @@ def cmd_sync(args):
         "date": date_str,
         "bundle": {
             "article": f"{project_slug}/article.md",
-            "notebook": f"{project_slug}/notebook.ipynb",
-            "architecture": f"{project_slug}/architecture.md",
+            "notebook": f"{project_slug}/notebook.ipynb" if dst_nb.exists() else None,
+            "architecture": f"{project_slug}/architecture.md" if dst_arch.exists() else None,
             "assets_dir": f"{project_slug}/assets/"
         }
     }
 
-    # Replace existing or append
     existing_idx = next((i for i, p in enumerate(projects) if p.get("slug") == project_slug), None)
     if existing_idx is not None:
         projects[existing_idx] = entry
@@ -450,7 +426,6 @@ def cmd_list(args):
         print("No courses directory found.")
         return
 
-    # Load manifest slugs
     published_slugs = set()
     if MANIFEST_FILE.exists():
         try:
@@ -460,19 +435,26 @@ def cmd_list(args):
             pass
 
     found_any = False
-    for course_dir in sorted(COURSES_DIR.iterdir()):
-        if course_dir.is_dir() and not course_dir.name.startswith("."):
-            print(f"\n🎓 Course: {course_dir.name}")
-            projects = [p for p in course_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
-            if not projects:
-                print("   (No projects yet)")
-            for p in projects:
+    for item in sorted(COURSES_DIR.iterdir()):
+        if item.is_dir() and not item.name.startswith("."):
+            # Check if it has direct project folders inside (e.g. architecture_and_notes) or subprojects
+            has_direct_project = (item / "architecture_and_notes").exists() or (item / "README.md").exists()
+            if has_direct_project:
                 found_any = True
-                status_icon = "🌐 Published" if p.name in published_slugs else "📝 Local only"
-                print(f"   └── 📦 {p.name} [{status_icon}]")
+                status_icon = "🌐 Published" if item.name in published_slugs else "📝 Local only"
+                print(f"📦 {item.name} [{status_icon}]")
+            else:
+                # Grouped course folder
+                subprojects = [p for p in item.iterdir() if p.is_dir() and not p.name.startswith(".")]
+                if subprojects:
+                    found_any = True
+                    print(f"🎓 Course: {item.name}")
+                    for sp in subprojects:
+                        status_icon = "🌐 Published" if sp.name in published_slugs else "📝 Local only"
+                        print(f"   └── 📦 {sp.name} [{status_icon}]")
 
     if not found_any:
-        print("\nNo course projects created yet. Run `python project_cli.py new` to get started!")
+        print("\nNo course projects found. Run `python project_cli.py new` to create one!")
 
 
 def main():
@@ -484,18 +466,20 @@ def main():
 
     # Command: new
     p_new = subparsers.add_parser("new", help="Scaffold a new course project")
-    p_new.add_argument("--course", help="Course directory identifier")
-    p_new.add_argument("--project", help="Project name identifier")
+    p_new.add_argument("--name", help="Course or project name (e.g. eda-in-hospitality-domain)")
+    p_new.add_argument("--course", help="Course identifier (alias for --name if no subproject)")
+    p_new.add_argument("--project", help="Optional subproject identifier")
     p_new.add_argument("--platform", help="Platform or institution where taught")
     p_new.add_argument("--instructor", help="Course instructor")
     p_new.add_argument("--url", help="Course URL or syllabus")
     p_new.add_argument("--objective", help="Project objective / description")
-    p_new.add_argument("--tech-stack", help="Primary tech stack")
+    p_new.add_argument("--tech-stack", help="Primary tech stack / tools")
 
     # Command: sync / publish
     p_sync = subparsers.add_parser("sync", aliases=["publish"], help="Sync project blog to research-notebooks bundle")
+    p_sync.add_argument("--name", help="Project name / slug to sync")
     p_sync.add_argument("--course", help="Course directory identifier")
-    p_sync.add_argument("--project", help="Project name identifier")
+    p_sync.add_argument("--project", help="Subproject identifier")
     p_sync.add_argument("--push", action="store_true", help="Automatically commit & push to GitHub")
 
     # Command: list
@@ -510,13 +494,13 @@ def main():
     elif args.command == "list":
         cmd_list(args)
     else:
-        # Default to interactive menu if no command provided
         print("Course Project Scaffolder & Publisher")
         print("1. Scaffold New Project (`new`)")
         print("2. Sync / Publish Project to Research Hub (`sync`)")
         print("3. List Courses & Projects (`list`)")
         choice = input("\nSelect an option [1-3]: ").strip()
         if choice == "1":
+            args.name = None
             args.course = None
             args.project = None
             args.platform = None
@@ -526,6 +510,7 @@ def main():
             args.tech_stack = None
             cmd_new(args)
         elif choice == "2":
+            args.name = None
             args.course = None
             args.project = None
             args.push = False
