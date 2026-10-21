@@ -5,11 +5,13 @@ project_cli.py - Course Project Scaffolder & Research Hub Publisher
 A clean, zero-dependency CLI tool to:
 1. Scaffold course/tutorial projects under `courses/<slug>/` with:
    - architecture_and_notes/ (system blueprints & notes)
-   - README.md (curriculum metadata: where taught, instructor, syllabus, objectives)
+   - README.md (curriculum metadata: where taught, instructor, syllabus, objectives, status)
    - tinker/ (clean empty directory for scratchpads, notebooks, exploratory scripts)
    - blog/ (technical article draft & assets)
    - deployable/ (clean empty directory for production/deployment code)
-2. Reflect & publish project blogs into `research-notebooks/` bundles,
+2. Interactive smart suggestions for Platform, Instructor, Tech Stack, Status, and URLs,
+   with persistent history saving.
+3. Reflect & publish project blogs into `research-notebooks/` bundles,
    auto-updating the Single-Request Manifest (`manifest.json`) and triggering CDN cache purges.
 """
 
@@ -34,6 +36,94 @@ ROOT_DIR = Path(__file__).resolve().parent
 COURSES_DIR = ROOT_DIR / "courses"
 RESEARCH_DIR = ROOT_DIR / "research-notebooks"
 MANIFEST_FILE = RESEARCH_DIR / "manifest.json"
+SUGGESTIONS_FILE = ROOT_DIR / ".cli_suggestions.json"
+
+DEFAULT_SUGGESTIONS = {
+    "platforms": [
+        "Codebasics",
+        "Coursera",
+        "DeepLearning.AI",
+        "YouTube",
+        "Udemy",
+        "Fast.ai",
+        "Stanford Online",
+        "CampusX",
+        "Self-Directed"
+    ],
+    "instructors": [
+        "Dhaval Patel (Codebasics)",
+        "Andrew Ng (DeepLearning.AI / Stanford)",
+        "Andrej Karpathy",
+        "Jeremy Howard (Fast.ai)",
+        "Krish Naik",
+        "Nitish Singh (CampusX)",
+        "Self-Taught"
+    ],
+    "statuses": [
+        "🚧 In Progress",
+        "🎯 Completed",
+        "📖 Planned / Backlog",
+        "⏸️ On Hold"
+    ],
+    "tech_stacks": [
+        "Python, Pandas, NumPy, Matplotlib, Seaborn (EDA & Analysis)",
+        "Python, Scikit-Learn, XGBoost, Pandas (Machine Learning)",
+        "PyTorch, Torchvision, CUDA (Deep Learning)",
+        "Python, LangChain, LlamaIndex, ChromaDB, Gemini/OpenAI (GenAI & LLMs)",
+        "SQL, Power BI, Excel, DAX (Business Intelligence & Analytics)",
+        "Python, FastAPI, Docker, MLflow, ONNX (MLOps & API Service)"
+    ],
+    "platform_urls": {
+        "Codebasics": "https://codebasics.io",
+        "Coursera": "https://coursera.org",
+        "DeepLearning.AI": "https://deeplearning.ai",
+        "YouTube": "https://youtube.com",
+        "Udemy": "https://udemy.com",
+        "Fast.ai": "https://fast.ai",
+        "Stanford Online": "https://online.stanford.edu",
+        "CampusX": "https://campusx.in"
+    }
+}
+
+
+def load_suggestions() -> dict:
+    """Loads saved suggestions from local history file or defaults."""
+    suggestions = json.loads(json.dumps(DEFAULT_SUGGESTIONS))
+    if SUGGESTIONS_FILE.exists():
+        try:
+            saved = json.loads(SUGGESTIONS_FILE.read_text(encoding="utf-8"))
+            for key in ["platforms", "instructors", "tech_stacks"]:
+                if key in saved and isinstance(saved[key], list):
+                    for item in reversed(saved[key]):
+                        if item and item not in suggestions[key]:
+                            suggestions[key].insert(0, item)
+            if "platform_urls" in saved and isinstance(saved["platform_urls"], dict):
+                suggestions["platform_urls"].update(saved["platform_urls"])
+        except Exception:
+            pass
+    return suggestions
+
+
+def save_user_suggestion(category: str, value: str):
+    """Saves a newly used value into local suggestions history."""
+    if not value or value.strip() == "":
+        return
+    clean_val = value.strip()
+    data = {}
+    if SUGGESTIONS_FILE.exists():
+        try:
+            data = json.loads(SUGGESTIONS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    items = data.get(category, [])
+    if clean_val in items:
+        items.remove(clean_val)
+    items.insert(0, clean_val)
+    data[category] = items[:30]  # retain up to 30 recent suggestions
+    try:
+        SUGGESTIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def slugify(text: str) -> str:
@@ -58,6 +148,63 @@ def prompt_input(prompt: str, default: str = "") -> str:
                 return raw
 
 
+def prompt_with_suggestions(label: str, category: str, default_idx: int = 1) -> str:
+    """Displays numbered suggestions and lets user choose or enter custom text."""
+    suggestions = load_suggestions()
+    items = suggestions.get(category, [])
+    print(f"\n💡 {label} Suggestions:")
+    for i, item in enumerate(items, 1):
+        print(f"   {i}. {item}")
+
+    default_val = items[default_idx - 1] if items and 1 <= default_idx <= len(items) else ""
+    prompt_text = f"Select [1-{len(items)}] or type custom"
+    if default_val:
+        prompt_text += f" (Default: {default_idx}. {default_val})"
+
+    raw = input(f"{prompt_text}: ").strip()
+
+    if not raw:
+        chosen = default_val
+    elif raw.isdigit() and 1 <= int(raw) <= len(items):
+        chosen = items[int(raw) - 1]
+    else:
+        chosen = raw
+
+    # Clean display (strip helper suffixes like (Codebasics) if user picked standard instructor)
+    save_user_suggestion(category, chosen)
+    return chosen
+
+
+def prompt_status() -> str:
+    """Prompt for project status with numbered presets."""
+    statuses = DEFAULT_SUGGESTIONS["statuses"]
+    print("\n💡 Status Suggestions:")
+    for i, s in enumerate(statuses, 1):
+        print(f"   {i}. {s}")
+    raw = input(f"Select status [1-{len(statuses)}] (Default: 1. {statuses[0]}): ").strip()
+    if not raw:
+        return statuses[0]
+    if raw.isdigit() and 1 <= int(raw) <= len(statuses):
+        return statuses[int(raw) - 1]
+    return raw
+
+
+def prompt_date() -> str:
+    """Prompt for start date with today as default."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    raw = input(f"\n📅 Start Date [Default: {today}]: ").strip()
+    return raw if raw else today
+
+
+def get_default_platform_url(platform_str: str) -> str:
+    """Finds best matching platform URL from suggestions."""
+    urls = load_suggestions().get("platform_urls", {})
+    for name, url in urls.items():
+        if name.lower() in platform_str.lower():
+            return url
+    return "N/A"
+
+
 def resolve_project_dir(name_or_course: str, subproject: str = None) -> Path:
     """Resolves project path, handling both flat courses/<name>/ and nested courses/<course>/<project>/."""
     slug_1 = slugify(name_or_course)
@@ -68,7 +215,7 @@ def resolve_project_dir(name_or_course: str, subproject: str = None) -> Path:
 
 
 def cmd_new(args):
-    """Scaffolds a new course project without double-nesting and leaves folders clean."""
+    """Scaffolds a new course project with saved suggestions."""
     print("=" * 60)
     print("🚀 Scaffolding New Course Project")
     print("=" * 60)
@@ -80,11 +227,18 @@ def cmd_new(args):
     if raw_sub and slugify(raw_sub) == slugify(raw_name):
         raw_sub = None
 
-    platform = args.platform or prompt_input("Platform / Institution (e.g. Codebasics, Coursera, YouTube)", "Self-Directed")
-    instructor = args.instructor or prompt_input("Instructor Name(s)", "Self-Taught")
-    course_url = args.url or prompt_input("Course / Syllabus URL", "N/A")
-    objective = args.objective or prompt_input("Project Objective", "Hands-on implementation and domain analysis.")
-    tech_stack = args.tech_stack or prompt_input("Primary Tech Stack / Tools (e.g. Python, SQL, PowerBI, Excel)", "General")
+    platform = args.platform or prompt_with_suggestions("Platform / Institution", "platforms")
+    instructor = args.instructor or prompt_with_suggestions("Instructor(s)", "instructors")
+
+    default_url = get_default_platform_url(platform)
+    course_url = args.url or prompt_input("\n🌐 Course / Syllabus URL", default_url)
+
+    status = args.status or prompt_status()
+    start_date = args.date or prompt_date()
+    tech_stack = args.tech_stack or prompt_with_suggestions("Primary Tech Stack / Tools", "tech_stacks")
+
+    default_obj = f"Comprehensive domain analysis and practical implementation for {raw_name.replace('-', ' ').title()}."
+    objective = args.objective or prompt_input("\n🎯 Project Objective", default_obj)
 
     project_dir = resolve_project_dir(raw_name, raw_sub)
     if project_dir.exists():
@@ -104,8 +258,6 @@ def cmd_new(args):
     for d in [arch_dir, tinker_dir, blog_assets_dir, deploy_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
-    today = datetime.now().strftime("%Y-%m-%d")
-
     # 1. README.md (acts as unified metadata index & filter for this course project)
     readme_content = f"""# {display_title}
 
@@ -121,8 +273,8 @@ def cmd_new(args):
 | **Platform / Institution** | {platform} |
 | **Instructor(s)** | {instructor} |
 | **Course / Syllabus URL** | [{course_url}]({course_url}) |
-| **Start Date** | {today} |
-| **Status** | 🚧 In Progress |
+| **Start Date** | {start_date} |
+| **Status** | {status} |
 | **Tech Stack / Tools** | `{tech_stack}` |
 
 ---
@@ -157,7 +309,7 @@ def cmd_new(args):
 **Course / Project:** {project_slug}  
 **Platform:** {platform}  
 **Instructor:** {instructor}  
-**Date:** {today}
+**Date:** {start_date}
 
 ---
 
@@ -181,22 +333,19 @@ graph TD
 """
     (arch_dir / "architecture.md").write_text(arch_content, encoding="utf-8")
 
-    # 3. tinker/ (leave completely clean with only .gitkeep)
+    # 3. Clean placeholder markers
     (tinker_dir / ".gitkeep").write_text("", encoding="utf-8")
-
-    # 4. deployable/ (leave completely clean with only .gitkeep)
     (deploy_dir / ".gitkeep").write_text("", encoding="utf-8")
-
-    # 5. blog/assets/ (clean with .gitkeep)
     (blog_assets_dir / ".gitkeep").write_text("", encoding="utf-8")
 
-    # 6. blog/article.md
+    # 4. blog/article.md
     blog_content = f"""---
 title: "{display_title}"
 slug: "{project_slug}"
 platform: "{platform}"
 instructor: "{instructor}"
-date: "{today}"
+date: "{start_date}"
+status: "{status}"
 tags: [{', '.join(f'"{t.strip()}"' for t in tech_stack.split(','))}]
 excerpt: "{objective}"
 ---
@@ -234,23 +383,23 @@ Summarize the outcomes and future scope.
     print("\n" + "=" * 60)
     print(f"✨ Project successfully created at: {project_dir.relative_to(ROOT_DIR)}")
     print("=" * 60)
-    print("Clean directories ready for your work:")
-    print(f"  • tinker/:       Place scratchpads, notebooks, scripts, or queries here (no forced boilerplate).")
-    print(f"  • deployable/:   Place your deliverable/production code here.")
-    print(f"  • blog/:         Draft your article in `blog/article.md`.")
-    print(f"  • Publish command: python project_cli.py sync --name {project_slug}")
+    print("Saved metadata:")
+    print(f"  • Platform:   {platform}")
+    print(f"  • Instructor: {instructor}")
+    print(f"  • Status:     {status}")
+    print(f"  • Date:       {start_date}")
+    print(f"  • Tech Stack: {tech_stack}")
+    print(f"\nNext command to publish when ready: python project_cli.py sync --name {project_slug}")
 
 
 def find_project_directory(identifier: str) -> Path:
     """Finds project by slug in courses/ (either flat courses/<slug> or nested courses/<course>/<slug>)."""
     target_slug = slugify(identifier)
 
-    # 1. Direct match: courses/<slug>
     direct = COURSES_DIR / target_slug
     if direct.exists() and direct.is_dir():
         return direct
 
-    # 2. Search subdirectories: courses/*/<slug>
     if COURSES_DIR.exists():
         for course_folder in COURSES_DIR.iterdir():
             if course_folder.is_dir():
@@ -306,9 +455,6 @@ def cmd_sync(args):
         if notebooks:
             dst_nb.write_text(notebooks[0].read_text(encoding="utf-8"), encoding="utf-8")
             print(f"✓ Synced primary notebook: {notebooks[0].name} -> notebook.ipynb")
-        elif dst_nb.exists():
-            # If no notebook in tinker, ensure no obsolete notebook remains
-            pass
 
     # 4. Copy blog assets
     src_assets = project_dir / "blog" / "assets"
@@ -353,7 +499,6 @@ def cmd_sync(args):
     word_count = len(article_text.split())
     reading_time = max(1, round(word_count / 200))
 
-    # Update manifest.json
     if not MANIFEST_FILE.exists():
         manifest_data = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -437,14 +582,12 @@ def cmd_list(args):
     found_any = False
     for item in sorted(COURSES_DIR.iterdir()):
         if item.is_dir() and not item.name.startswith("."):
-            # Check if it has direct project folders inside (e.g. architecture_and_notes) or subprojects
             has_direct_project = (item / "architecture_and_notes").exists() or (item / "README.md").exists()
             if has_direct_project:
                 found_any = True
                 status_icon = "🌐 Published" if item.name in published_slugs else "📝 Local only"
                 print(f"📦 {item.name} [{status_icon}]")
             else:
-                # Grouped course folder
                 subprojects = [p for p in item.iterdir() if p.is_dir() and not p.name.startswith(".")]
                 if subprojects:
                     found_any = True
@@ -472,6 +615,8 @@ def main():
     p_new.add_argument("--platform", help="Platform or institution where taught")
     p_new.add_argument("--instructor", help="Course instructor")
     p_new.add_argument("--url", help="Course URL or syllabus")
+    p_new.add_argument("--status", help="Project status (e.g. '🚧 In Progress', '🎯 Completed')")
+    p_new.add_argument("--date", help="Start date (YYYY-MM-DD)")
     p_new.add_argument("--objective", help="Project objective / description")
     p_new.add_argument("--tech-stack", help="Primary tech stack / tools")
 
@@ -506,6 +651,8 @@ def main():
             args.platform = None
             args.instructor = None
             args.url = None
+            args.status = None
+            args.date = None
             args.objective = None
             args.tech_stack = None
             cmd_new(args)

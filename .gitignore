@@ -78,3 +78,4 @@ research-notebooks/
 
 # Prototyping checkpoints
 **/tinker/.ipynb_checkpoints/
+.cli_suggestions.json
