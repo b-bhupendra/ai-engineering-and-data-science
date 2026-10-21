@@ -75,3 +75,6 @@ Thumbs.db
 
 # Standalone repositories
 research-notebooks/
+
+# Prototyping checkpoints
+**/tinker/.ipynb_checkpoints/
