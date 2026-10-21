@@ -86,26 +86,72 @@ DEFAULT_SUGGESTIONS = {
 }
 
 
+def scan_courses_metadata() -> dict:
+    """Scans existing courses for previously used metadata to bootstrap suggestions."""
+    found = {"platforms": [], "instructors": [], "tech_stacks": []}
+    if not COURSES_DIR.exists():
+        return found
+    for readme in COURSES_DIR.glob("**/README.md"):
+        try:
+            content = readme.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                if "**Platform / Institution**" in line and "|" in line:
+                    val = line.split("|")[-2].strip()
+                    if val and val not in found["platforms"]:
+                        found["platforms"].append(val)
+                elif "**Instructor(s)**" in line and "|" in line:
+                    val = line.split("|")[-2].strip()
+                    if val and val not in found["instructors"]:
+                        found["instructors"].append(val)
+                elif "**Tech Stack" in line and "|" in line:
+                    val = line.split("|")[-2].strip().strip("`")
+                    if val and val not in found["tech_stacks"]:
+                        found["tech_stacks"].append(val)
+        except Exception:
+            pass
+    return found
+
+
 def load_suggestions() -> dict:
-    """Loads saved suggestions from local history file or defaults."""
+    """Loads saved suggestions, prioritizing the most recently used items at #1 (default)."""
     suggestions = json.loads(json.dumps(DEFAULT_SUGGESTIONS))
+    
+    # 1. Merge discovered metadata from workspace courses
+    scanned = scan_courses_metadata()
+    for cat in ["platforms", "instructors", "tech_stacks"]:
+        for item in scanned.get(cat, []):
+            if item and item not in suggestions[cat]:
+                suggestions[cat].insert(0, item)
+
+    # 2. Merge local saved history file (most recent items at the very top)
     if SUGGESTIONS_FILE.exists():
         try:
             saved = json.loads(SUGGESTIONS_FILE.read_text(encoding="utf-8"))
-            for key in ["platforms", "instructors", "tech_stacks"]:
+            for key in ["platforms", "instructors", "tech_stacks", "statuses"]:
                 if key in saved and isinstance(saved[key], list):
-                    for item in reversed(saved[key]):
-                        if item and item not in suggestions[key]:
-                            suggestions[key].insert(0, item)
+                    reordered = []
+                    # Insert saved items first (MRU order)
+                    for item in saved[key]:
+                        if item and item not in reordered:
+                            reordered.append(item)
+                    # Append remaining default presets
+                    for item in suggestions.get(key, []):
+                        if item and item not in reordered:
+                            reordered.append(item)
+                    suggestions[key] = reordered
+
             if "platform_urls" in saved and isinstance(saved["platform_urls"], dict):
                 suggestions["platform_urls"].update(saved["platform_urls"])
+            if "last_url" in saved:
+                suggestions["last_url"] = saved["last_url"]
         except Exception:
             pass
+
     return suggestions
 
 
 def save_user_suggestion(category: str, value: str):
-    """Saves a newly used value into local suggestions history."""
+    """Saves a newly used value into local suggestions history as the top item (#1)."""
     if not value or value.strip() == "":
         return
     clean_val = value.strip()
@@ -116,10 +162,32 @@ def save_user_suggestion(category: str, value: str):
         except Exception:
             data = {}
     items = data.get(category, [])
+    # Move to position 0 so it becomes #1 next time
     if clean_val in items:
         items.remove(clean_val)
     items.insert(0, clean_val)
     data[category] = items[:30]  # retain up to 30 recent suggestions
+    try:
+        SUGGESTIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def save_platform_url(platform: str, url: str):
+    """Associates a URL with a platform for instant default resolution next time."""
+    if not url or url.strip() in ["", "N/A", "None"]:
+        return
+    clean_url = url.strip()
+    data = {}
+    if SUGGESTIONS_FILE.exists():
+        try:
+            data = json.loads(SUGGESTIONS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    urls = data.get("platform_urls", {})
+    urls[platform] = clean_url
+    data["platform_urls"] = urls
+    data["last_url"] = clean_url
     try:
         SUGGESTIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception:
@@ -228,14 +296,21 @@ def cmd_new(args):
         raw_sub = None
 
     platform = args.platform or prompt_with_suggestions("Platform / Institution", "platforms")
+    save_user_suggestion("platforms", platform)
+
     instructor = args.instructor or prompt_with_suggestions("Instructor(s)", "instructors")
+    save_user_suggestion("instructors", instructor)
 
     default_url = get_default_platform_url(platform)
     course_url = args.url or prompt_input("\n🌐 Course / Syllabus URL", default_url)
+    save_platform_url(platform, course_url)
 
     status = args.status or prompt_status()
+    save_user_suggestion("statuses", status)
+
     start_date = args.date or prompt_date()
     tech_stack = args.tech_stack or prompt_with_suggestions("Primary Tech Stack / Tools", "tech_stacks")
+    save_user_suggestion("tech_stacks", tech_stack)
 
     default_obj = f"Comprehensive domain analysis and practical implementation for {raw_name.replace('-', ' ').title()}."
     objective = args.objective or prompt_input("\n🎯 Project Objective", default_obj)
